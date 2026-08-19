@@ -1,0 +1,98 @@
+blueprint:
+  name: Bathroom Light Occupancy Control
+  description: >
+    Light on immediately on occupancy, off N minutes after clear
+    (light_off_timer). Duration is set on the timer helper entity itself —
+    this blueprint just sequences it. The "occupancy cleared" trigger has
+    an optional debounce to filter momentary sensor drop-outs (e.g.
+    multi-sensor group boundary blips) without delaying the "occupancy
+    detected" response. Use the sensor's own absence-delay setting (e.g.
+    FP300's absence_delay_timer) as the primary fix where available —
+    this debounce is a backstop, so leave it at 0 if the sensor already
+    handles it.
+  domain: automation
+  source_url: ""
+  input:
+    occupancy_sensor:
+      name: Occupancy sensor
+      selector:
+        entity:
+          domain: binary_sensor
+    light_switch:
+      name: Light switch
+      selector:
+        entity:
+          domain: switch
+    light_off_timer:
+      name: Light-off delay timer
+      description: Starts when occupancy clears; on finish, light turns off.
+      selector:
+        entity:
+          domain: timer
+    occupancy_clear_debounce:
+      name: Occupancy-cleared debounce
+      description: >
+        Ignore momentary occupancy drop-outs shorter than this before
+        treating the room as vacated. Only applies to the "occupancy
+        cleared" trigger — occupancy detected still reacts instantly.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: seconds
+          mode: box
+
+mode: queued
+max: 10
+
+trigger:
+  - trigger: state
+    entity_id: !input occupancy_sensor
+    to: "on"
+    id: occupancy_on
+  - trigger: state
+    entity_id: !input occupancy_sensor
+    to: "off"
+    for:
+      seconds: !input occupancy_clear_debounce
+    id: occupancy_off
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: !input light_off_timer
+    id: light_off_timer_finished
+
+condition: []
+
+action:
+  - choose:
+      # --- Occupancy detected ---
+      - conditions:
+          - condition: trigger
+            id: occupancy_on
+        sequence:
+          - action: timer.cancel
+            target:
+              entity_id: !input light_off_timer
+          - action: switch.turn_on
+            target:
+              entity_id: !input light_switch
+
+      # --- Occupancy cleared ---
+      - conditions:
+          - condition: trigger
+            id: occupancy_off
+        sequence:
+          - action: timer.start
+            target:
+              entity_id: !input light_off_timer
+
+      # --- Light-off timer elapsed ---
+      - conditions:
+          - condition: trigger
+            id: light_off_timer_finished
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input light_switch
