@@ -1,0 +1,168 @@
+blueprint:
+  name: Bathroom Light & Fan Occupancy Control
+  description: >
+    Light on immediately on occupancy, off N minutes after clear
+    (light_off_timer). Fan on after continuous occupancy of N minutes
+    (fan_on_timer), off N minutes after clear (fan_off_timer).
+    All durations are set on the timer helper entities themselves —
+    this blueprint just sequences them. The "occupancy cleared" trigger
+    has an optional debounce to filter momentary sensor drop-outs (e.g.
+    multi-sensor group boundary blips) without delaying the "occupancy
+    detected" response.
+  domain: automation
+  source_url: ""
+  input:
+    occupancy_sensor:
+      name: Occupancy sensor
+      selector:
+        entity:
+          domain: binary_sensor
+    light_switch:
+      name: Light switch
+      selector:
+        entity:
+          domain: switch
+    fan_switch:
+      name: Exhaust fan switch
+      selector:
+        entity:
+          domain: switch
+    light_off_timer:
+      name: Light-off delay timer
+      description: Starts when occupancy clears; on finish, light turns off.
+      selector:
+        entity:
+          domain: timer
+    fan_on_timer:
+      name: Fan-on delay timer
+      description: Starts when occupancy detected; on finish, fan turns on.
+      selector:
+        entity:
+          domain: timer
+    fan_off_timer:
+      name: Fan-off delay timer
+      description: Starts when occupancy clears (if fan is on); on finish, fan turns off.
+      selector:
+        entity:
+          domain: timer
+    occupancy_clear_debounce:
+      name: Occupancy-cleared debounce
+      description: >
+        Ignore momentary occupancy drop-outs shorter than this (e.g. FP300
+        boundary blips on multi-sensor groups) before treating the room as
+        vacated. Only applies to the "occupancy cleared" trigger — occupancy
+        detected still reacts instantly.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: seconds
+          mode: box
+
+mode: queued
+max: 10
+
+trigger:
+  - trigger: state
+    entity_id: !input occupancy_sensor
+    to: "on"
+    id: occupancy_on
+  - trigger: state
+    entity_id: !input occupancy_sensor
+    to: "off"
+    for:
+      seconds: !input occupancy_clear_debounce
+    id: occupancy_off
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: !input fan_on_timer
+    id: fan_on_timer_finished
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: !input light_off_timer
+    id: light_off_timer_finished
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: !input fan_off_timer
+    id: fan_off_timer_finished
+
+condition: []
+
+action:
+  - choose:
+      # --- Occupancy detected ---
+      - conditions:
+          - condition: trigger
+            id: occupancy_on
+        sequence:
+          - action: timer.cancel
+            target:
+              entity_id: !input light_off_timer
+          - action: timer.cancel
+            target:
+              entity_id: !input fan_off_timer
+          - action: switch.turn_on
+            target:
+              entity_id: !input light_switch
+          # Only (re)start the fan-on delay if the fan isn't already running
+          - if:
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: !input fan_switch
+                    state: "on"
+            then:
+              - action: timer.start
+                target:
+                  entity_id: !input fan_on_timer
+
+      # --- Occupancy cleared ---
+      - conditions:
+          - condition: trigger
+            id: occupancy_off
+        sequence:
+          - action: timer.cancel
+            target:
+              entity_id: !input fan_on_timer
+          - action: timer.start
+            target:
+              entity_id: !input light_off_timer
+          - if:
+              - condition: state
+                entity_id: !input fan_switch
+                state: "on"
+            then:
+              - action: timer.start
+                target:
+                  entity_id: !input fan_off_timer
+
+      # --- Fan-on timer elapsed (2 min continuous occupancy) ---
+      - conditions:
+          - condition: trigger
+            id: fan_on_timer_finished
+        sequence:
+          - action: switch.turn_on
+            target:
+              entity_id: !input fan_switch
+
+      # --- Light-off timer elapsed ---
+      - conditions:
+          - condition: trigger
+            id: light_off_timer_finished
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input light_switch
+
+      # --- Fan-off timer elapsed ---
+      - conditions:
+          - condition: trigger
+            id: fan_off_timer_finished
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input fan_switch
