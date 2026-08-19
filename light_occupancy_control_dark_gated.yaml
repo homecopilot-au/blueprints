@@ -13,7 +13,7 @@ blueprint:
     drop-outs — leave it at 0 if your sensor already has its own
     absence-delay setting (e.g. FP300's absence_delay_timer).
   domain: automation
-  source_url: ""
+  source_url: https://github.com/homecopilot-au/blueprints/blob/main/light_occupancy_control_dark_gated.yaml
   input:
     occupancy_sensor:
       name: Occupancy sensor
