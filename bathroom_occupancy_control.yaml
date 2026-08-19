@@ -10,7 +10,7 @@ blueprint:
     multi-sensor group boundary blips) without delaying the "occupancy
     detected" response.
   domain: automation
-  source_url: "https://github.com/homecopilot-au/blueprints/blob/main/bathroom_occupancy_control.yaml"
+  source_url: https://github.com/homecopilot-au/blueprints/blob/main/bathroom_occupancy_control.yaml
   input:
     occupancy_sensor:
       name: Occupancy sensor
