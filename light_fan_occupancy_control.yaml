@@ -1,5 +1,5 @@
 blueprint:
-  name: Bathroom Light & Fan Occupancy Control
+  name: Light & Fan Occupancy Control
   description: >
     Light on immediately on occupancy, off N minutes after clear
     (light_off_timer). Fan on after continuous occupancy of N minutes

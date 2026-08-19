@@ -1,5 +1,5 @@
 blueprint:
-  name: Bathroom Light Occupancy Control
+  name: Light Occupancy Control
   description: >
     Light on immediately on occupancy, off N minutes after clear
     (light_off_timer). Duration is set on the timer helper entity itself —
