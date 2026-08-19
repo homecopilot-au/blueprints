@@ -11,7 +11,7 @@ blueprint:
     this debounce is a backstop, so leave it at 0 if the sensor already
     handles it.
   domain: automation
-  source_url: https://github.com/homecopilot-au/blueprints/blob/main/bathroom_light_occupancy_control.yaml
+  source_url: https://github.com/homecopilot-au/blueprints/blob/main/light_occupancy_control.yaml
   input:
     occupancy_sensor:
       name: Occupancy sensor
