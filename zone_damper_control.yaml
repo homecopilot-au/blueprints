@@ -129,9 +129,11 @@ action:
            expand(window_sensors) | selectattr('state', 'eq', 'on') | list | count > 0 }}
       spill_active: >-
         {{ spill_sensor != '' and is_state(spill_sensor, 'on') }}
+      last_seen_state: "{{ states(room_sensor_last_seen) if room_sensor_last_seen != '' else none }}"
+      last_seen_dt: "{{ (last_seen_state | as_datetime) if last_seen_state not in [none, 'unknown', 'unavailable'] else none }}"
       is_stale: >-
-        {{ room_sensor_last_seen != '' and
-           (now() - (states(room_sensor_last_seen) | as_datetime)).total_seconds() > (stale_after_minutes | float * 60) }}
+        {{ last_seen_dt is not none and
+           (now() - last_seen_dt).total_seconds() > (stale_after_minutes | float * 60) }}
       need: >-
         {% if master_action == 'cooling' %}
           {{ current - target }}
