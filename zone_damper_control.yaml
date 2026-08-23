@@ -8,7 +8,7 @@ blueprint:
     stale-sensor safety hold, a per-zone enabled/disabled toggle, and skips
     control entirely while the zone is acting as the AirTouch spill zone.
   domain: automation
-  source_url: https://claude.ai
+  source_url: https://github.com/homecopilot-au/blueprints/blob/main/zone_damper_control.yaml
   input:
     room_sensor:
       name: Room Temperature Sensor
