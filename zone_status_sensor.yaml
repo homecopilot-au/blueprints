@@ -1,0 +1,97 @@
+blueprint:
+  name: Zone Status Sensor (AirTouch)
+  description: >
+    Read-only status text for a zone dashboard card, explaining in plain
+    language what the damper control automation is currently doing and why
+    (at target, adjusting, unreachable in current mode, window open, stale
+    sensor, or spill zone active).
+  domain: template
+  source_url: https://claude.ai
+  input:
+    zone_name:
+      name: Zone Name
+      description: Used in the entity's friendly name, e.g. "Study"
+      selector:
+        text:
+    room_sensor:
+      name: Room Temperature Sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+    room_sensor_last_seen:
+      name: Room Sensor Last Seen (optional)
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+          device_class: timestamp
+    stale_after_minutes:
+      name: Stale After (minutes)
+      default: 180
+      selector:
+        number:
+          min: 15
+          max: 1440
+          unit_of_measurement: minutes
+    target_temp:
+      name: Target Temperature Helper
+      selector:
+        entity:
+          domain: input_number
+    master_climate:
+      name: Master AC Climate Entity
+      selector:
+        entity:
+          domain: climate
+    window_sensors:
+      name: Window/Door Sensors (optional)
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+    spill_sensor:
+      name: Spill Zone Indicator (optional)
+      default: ""
+      selector:
+        entity:
+          domain: binary_sensor
+
+sensor:
+  - name: "{{ input('zone_name') }} Status"
+    unique_id: "{{ input('zone_name') | slugify }}_ac_status"
+    icon: mdi:information-outline
+    state: >-
+      {% set room_sensor = input('room_sensor') %}
+      {% set room_sensor_last_seen = input('room_sensor_last_seen') %}
+      {% set stale_after_minutes = input('stale_after_minutes') %}
+      {% set target_temp = input('target_temp') %}
+      {% set master_climate = input('master_climate') %}
+      {% set window_sensors = input('window_sensors') %}
+      {% set spill_sensor = input('spill_sensor') %}
+      {% set current = states(room_sensor) | float(0) %}
+      {% set target = states(target_temp) | float(0) %}
+      {% set master_mode = states(master_climate) %}
+      {% set any_window_open = window_sensors | length > 0 and
+           expand(window_sensors) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+      {% set spill_active = spill_sensor != '' and is_state(spill_sensor, 'on') %}
+      {% set is_stale = room_sensor_last_seen != '' and
+           (now() - (states(room_sensor_last_seen) | as_datetime)).total_seconds() > (stale_after_minutes | float * 60) %}
+      {% if spill_active %}
+        Spill zone active — AirTouch controlling directly
+      {% elif any_window_open %}
+        Off — window open
+      {% elif is_stale %}
+        Off — sensor not reporting
+      {% elif master_mode == 'cool' and target > current %}
+        Can't reach target — Cool mode active house-wide
+      {% elif master_mode == 'heat' and target < current %}
+        Can't reach target — Heat mode active house-wide
+      {% elif master_mode in ['off', 'dry', 'fan_only', 'unavailable', 'unknown'] %}
+        Idle — AC not heating/cooling
+      {% elif (current - target) | abs < 0.3 %}
+        At target
+      {% else %}
+        {{ master_mode | capitalize }}ing to {{ target }}°C
+      {% endif %}

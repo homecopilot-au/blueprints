@@ -1,0 +1,158 @@
+blueprint:
+  name: Zone Damper Control (AirTouch)
+  description: >
+    Drives an AirTouch zone damper to a percentage open position based on a
+    room's own temperature sensor and target, reading the master AC unit's
+    current hvac_mode to determine cooling vs heating direction. Handles
+    window pause, stale-sensor safety hold, and skips control entirely while
+    the zone is acting as the AirTouch spill zone.
+  domain: automation
+  source_url: https://claude.ai
+  input:
+    room_sensor:
+      name: Room Temperature Sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+    room_sensor_last_seen:
+      name: Room Sensor Last Seen (optional)
+      description: >
+        A datetime/timestamp entity showing when the room sensor last
+        reported. Leave unset to disable staleness checking for this zone.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+          device_class: timestamp
+    stale_after_minutes:
+      name: Stale After (minutes)
+      description: How long since last report before the sensor is treated as stale and the damper is held at its current position.
+      default: 180
+      selector:
+        number:
+          min: 15
+          max: 1440
+          unit_of_measurement: minutes
+    damper_cover:
+      name: Zone Damper
+      selector:
+        entity:
+          domain: cover
+    target_temp:
+      name: Target Temperature Helper
+      selector:
+        entity:
+          domain: input_number
+    master_climate:
+      name: Master AC Climate Entity
+      selector:
+        entity:
+          domain: climate
+    window_sensors:
+      name: Window/Door Sensors (optional)
+      description: One or more contact sensors. Any open pauses this zone (damper forced closed).
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+    spill_sensor:
+      name: Spill Zone Indicator (optional)
+      description: If this zone is AirTouch's designated spill zone, provide its binary_sensor. When active, this automation does nothing and lets AirTouch control the damper directly.
+      default: ""
+      selector:
+        entity:
+          domain: binary_sensor
+    gain:
+      name: Proportional Gain (%/°C)
+      description: Damper percentage change per degree of difference from target. Higher = more aggressive response.
+      default: 20
+      selector:
+        number:
+          min: 5
+          max: 50
+          unit_of_measurement: "%/°C"
+    step:
+      name: Damper Step Size
+      description: Round calculated position to the nearest multiple of this (AirTouch only accepts 5% increments).
+      default: 5
+      selector:
+        number:
+          min: 5
+          max: 25
+          unit_of_measurement: "%"
+
+trigger:
+  - platform: time_pattern
+    minutes: "/5"
+  - platform: state
+    entity_id: !input room_sensor
+  - platform: state
+    entity_id: !input target_temp
+  - platform: state
+    entity_id: !input master_climate
+    attribute: hvac_mode
+  - platform: state
+    entity_id: !input window_sensors
+
+condition: []
+
+action:
+  - variables:
+      damper_cover: !input damper_cover
+      room_sensor: !input room_sensor
+      room_sensor_last_seen: !input room_sensor_last_seen
+      stale_after_minutes: !input stale_after_minutes
+      target_temp: !input target_temp
+      master_climate: !input master_climate
+      window_sensors: !input window_sensors
+      spill_sensor: !input spill_sensor
+      gain: !input gain
+      step: !input step
+      current: "{{ states(room_sensor) | float(0) }}"
+      target: "{{ states(target_temp) | float(0) }}"
+      master_mode: "{{ states(master_climate) }}"
+      any_window_open: >-
+        {{ window_sensors | length > 0 and
+           expand(window_sensors) | selectattr('state', 'eq', 'on') | list | count > 0 }}
+      spill_active: >-
+        {{ spill_sensor != '' and is_state(spill_sensor, 'on') }}
+      is_stale: >-
+        {{ room_sensor_last_seen != '' and
+           (now() - (states(room_sensor_last_seen) | as_datetime)).total_seconds() > (stale_after_minutes | float * 60) }}
+      need: >-
+        {% if master_mode == 'cool' %}
+          {{ current - target }}
+        {% elif master_mode == 'heat' %}
+          {{ target - current }}
+        {% else %}
+          {{ -100 }}
+        {% endif %}
+      raw_position: "{{ (gain | float) * (need | float) }}"
+      stepped_position: "{{ ((raw_position / step) | round(0) * step) | int }}"
+      clamped_position: "{{ [0, [100, stepped_position] | min] | max }}"
+  - choose:
+      # Spill zone: hands off, let AirTouch control it directly
+      - conditions: "{{ spill_active }}"
+        sequence: []
+      # Window open: force closed
+      - conditions: "{{ any_window_open }}"
+        sequence:
+          - service: cover.set_cover_position
+            target:
+              entity_id: !input damper_cover
+            data:
+              position: 0
+      # Stale sensor: hold current position, don't recompute
+      - conditions: "{{ is_stale }}"
+        sequence: []
+    default:
+      - service: cover.set_cover_position
+        target:
+          entity_id: !input damper_cover
+        data:
+          position: "{{ clamped_position }}"
+
+mode: single
+max_exceeded: silent
