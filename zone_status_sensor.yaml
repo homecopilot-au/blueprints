@@ -58,18 +58,20 @@ blueprint:
         entity:
           domain: binary_sensor
 
+variables:
+  zone_name: !input zone_name
+  room_sensor: !input room_sensor
+  room_sensor_last_seen: !input room_sensor_last_seen
+  stale_after_minutes: !input stale_after_minutes
+  target_temp: !input target_temp
+  master_climate: !input master_climate
+  window_sensors: !input window_sensors
+  spill_sensor: !input spill_sensor
+
 sensor:
-  - name: "{{ input('zone_name') }} Status"
-    unique_id: "{{ input('zone_name') | slugify }}_ac_status"
+  - name: "{{ zone_name }} Status"
     icon: mdi:information-outline
     state: >-
-      {% set room_sensor = input('room_sensor') %}
-      {% set room_sensor_last_seen = input('room_sensor_last_seen') %}
-      {% set stale_after_minutes = input('stale_after_minutes') %}
-      {% set target_temp = input('target_temp') %}
-      {% set master_climate = input('master_climate') %}
-      {% set window_sensors = input('window_sensors') %}
-      {% set spill_sensor = input('spill_sensor') %}
       {% set current = states(room_sensor) | float(0) %}
       {% set target = states(target_temp) | float(0) %}
       {% set master_mode = states(master_climate) %}
