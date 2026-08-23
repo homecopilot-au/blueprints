@@ -6,7 +6,7 @@ blueprint:
     (at target, adjusting, unreachable in current mode, window open, stale
     sensor, or spill zone active).
   domain: template
-  source_url: https://claude.ai
+  source_url: https://github.com/homecopilot-au/blueprints/blob/main/zone_status_sensor.yaml
   input:
     zone_name:
       name: Zone Name
