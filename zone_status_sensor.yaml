@@ -57,6 +57,12 @@ blueprint:
       selector:
         entity:
           domain: binary_sensor
+    zone_enabled:
+      name: Zone Enabled Toggle
+      description: The input_boolean representing whether this zone should be conditioned at all.
+      selector:
+        entity:
+          domain: input_boolean
 
 variables:
   zone_name: !input zone_name
@@ -67,33 +73,37 @@ variables:
   master_climate: !input master_climate
   window_sensors: !input window_sensors
   spill_sensor: !input spill_sensor
+  zone_enabled: !input zone_enabled
 
 sensor:
-  - name: "{{ zone_name }} Status"
-    icon: mdi:information-outline
-    state: >-
-      {% set current = states(room_sensor) | float(0) %}
-      {% set target = states(target_temp) | float(0) %}
-      {% set master_mode = states(master_climate) %}
-      {% set any_window_open = window_sensors | length > 0 and
-           expand(window_sensors) | selectattr('state', 'eq', 'on') | list | count > 0 %}
-      {% set spill_active = spill_sensor != '' and is_state(spill_sensor, 'on') %}
-      {% set is_stale = room_sensor_last_seen != '' and
-           (now() - (states(room_sensor_last_seen) | as_datetime)).total_seconds() > (stale_after_minutes | float * 60) %}
-      {% if spill_active %}
-        Spill zone active — AirTouch controlling directly
-      {% elif any_window_open %}
-        Off — window open
-      {% elif is_stale %}
-        Off — sensor not reporting
-      {% elif master_mode == 'cool' and target > current %}
-        Can't reach target — Cool mode active house-wide
-      {% elif master_mode == 'heat' and target < current %}
-        Can't reach target — Heat mode active house-wide
-      {% elif master_mode in ['off', 'dry', 'fan_only', 'unavailable', 'unknown'] %}
-        Idle — AC not heating/cooling
-      {% elif (current - target) | abs < 0.3 %}
-        At target
-      {% else %}
-        {{ master_mode | capitalize }}ing to {{ target }}°C
-      {% endif %}
+  name: "{{ zone_name }} Aircon Status"
+  icon: mdi:information-outline
+  state: >-
+    {% set current = states(room_sensor) | float(0) %}
+    {% set target = states(target_temp) | float(0) %}
+    {% set master_action = state_attr(master_climate, 'hvac_action') %}
+    {% set zone_is_enabled = is_state(zone_enabled, 'on') %}
+    {% set any_window_open = window_sensors | length > 0 and
+         expand(window_sensors) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+    {% set spill_active = spill_sensor != '' and is_state(spill_sensor, 'on') %}
+    {% set is_stale = room_sensor_last_seen != '' and
+         (now() - (states(room_sensor_last_seen) | as_datetime)).total_seconds() > (stale_after_minutes | float * 60) %}
+    {% if spill_active %}
+      Spill zone active — AirTouch controlling directly
+    {% elif not zone_is_enabled %}
+      Off — zone disabled
+    {% elif any_window_open %}
+      Off — window open
+    {% elif is_stale %}
+      Off — sensor not reporting
+    {% elif master_action == 'cooling' and target > current %}
+      Can't reach target — cooling active house-wide
+    {% elif master_action == 'heating' and target < current %}
+      Can't reach target — heating active house-wide
+    {% elif master_action not in ['heating', 'cooling'] %}
+      Idle — AC not heating/cooling
+    {% elif (current - target) | abs < 0.3 %}
+      At target
+    {% else %}
+      {{ master_action | capitalize }} to {{ target }}°C
+    {% endif %}
