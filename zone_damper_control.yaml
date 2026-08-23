@@ -3,9 +3,10 @@ blueprint:
   description: >
     Drives an AirTouch zone damper to a percentage open position based on a
     room's own temperature sensor and target, reading the master AC unit's
-    current hvac_mode to determine cooling vs heating direction. Handles
-    window pause, stale-sensor safety hold, and skips control entirely while
-    the zone is acting as the AirTouch spill zone.
+    live hvac_action (heating/cooling/idle) to determine direction - correctly
+    handles heat_cool mode, not just heat/cool. Also handles window pause,
+    stale-sensor safety hold, a per-zone enabled/disabled toggle, and skips
+    control entirely while the zone is acting as the AirTouch spill zone.
   domain: automation
   source_url: https://claude.ai
   input:
@@ -64,6 +65,12 @@ blueprint:
       selector:
         entity:
           domain: binary_sensor
+    zone_enabled:
+      name: Zone Enabled Toggle
+      description: The input_boolean representing whether this zone should be conditioned at all. When off, the damper is forced closed and no regulation runs.
+      selector:
+        entity:
+          domain: input_boolean
     gain:
       name: Proportional Gain (%/°C)
       description: Damper percentage change per degree of difference from target. Higher = more aggressive response.
@@ -92,9 +99,11 @@ trigger:
     entity_id: !input target_temp
   - platform: state
     entity_id: !input master_climate
-    attribute: hvac_mode
+    attribute: hvac_action
   - platform: state
     entity_id: !input window_sensors
+  - platform: state
+    entity_id: !input zone_enabled
 
 condition: []
 
@@ -108,11 +117,13 @@ action:
       master_climate: !input master_climate
       window_sensors: !input window_sensors
       spill_sensor: !input spill_sensor
+      zone_enabled: !input zone_enabled
       gain: !input gain
       step: !input step
       current: "{{ states(room_sensor) | float(0) }}"
       target: "{{ states(target_temp) | float(0) }}"
-      master_mode: "{{ states(master_climate) }}"
+      master_action: "{{ state_attr(master_climate, 'hvac_action') }}"
+      zone_is_enabled: "{{ is_state(zone_enabled, 'on') }}"
       any_window_open: >-
         {{ window_sensors | length > 0 and
            expand(window_sensors) | selectattr('state', 'eq', 'on') | list | count > 0 }}
@@ -122,9 +133,9 @@ action:
         {{ room_sensor_last_seen != '' and
            (now() - (states(room_sensor_last_seen) | as_datetime)).total_seconds() > (stale_after_minutes | float * 60) }}
       need: >-
-        {% if master_mode == 'cool' %}
+        {% if master_action == 'cooling' %}
           {{ current - target }}
-        {% elif master_mode == 'heat' %}
+        {% elif master_action == 'heating' %}
           {{ target - current }}
         {% else %}
           {{ -100 }}
@@ -136,6 +147,14 @@ action:
       # Spill zone: hands off, let AirTouch control it directly
       - conditions: "{{ spill_active }}"
         sequence: []
+      # Zone disabled: force closed, no regulation
+      - conditions: "{{ not zone_is_enabled }}"
+        sequence:
+          - service: cover.set_cover_position
+            target:
+              entity_id: !input damper_cover
+            data:
+              position: 0
       # Window open: force closed
       - conditions: "{{ any_window_open }}"
         sequence:
