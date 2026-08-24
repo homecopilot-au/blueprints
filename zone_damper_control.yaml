@@ -4,9 +4,11 @@ blueprint:
     Drives an AirTouch zone damper to a percentage open position based on a
     room's own temperature sensor and target, reading the master AC unit's
     live hvac_action (heating/cooling/idle) to determine direction - correctly
-    handles heat_cool mode, not just heat/cool. Also handles window pause,
-    stale-sensor safety hold, a per-zone enabled/disabled toggle, and skips
-    control entirely while the zone is acting as the AirTouch spill zone.
+    handles heat_cool mode, not just heat/cool. Wakes the master AC (using its
+    last_active_hvac_mode) if this zone is enabled and the master has shut
+    itself off. Also handles window pause, stale-sensor safety hold, a
+    per-zone enabled/disabled toggle, and skips control entirely while the
+    zone is acting as the AirTouch spill zone.
   domain: automation
   source_url: https://github.com/homecopilot-au/blueprints/blob/main/zone_damper_control.yaml
   input:
@@ -52,12 +54,21 @@ blueprint:
           domain: climate
     window_sensors:
       name: Window/Door Sensors (optional)
-      description: One or more contact sensors. Any open pauses this zone (damper forced closed).
+      description: One or more contact sensors. Any open for longer than the grace period pauses this zone (damper forced closed).
       default: []
       selector:
         entity:
           domain: binary_sensor
           multiple: true
+    window_grace_minutes:
+      name: Window Open Grace Period (minutes)
+      description: How long a window/door must stay open before the damper closes. A brief open (letting a pet out, carrying something in) won't trigger it.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 30
+          unit_of_measurement: minutes
     spill_sensor:
       name: Spill Zone Indicator (optional)
       description: If this zone is AirTouch's designated spill zone, provide its binary_sensor. When active, this automation does nothing and lets AirTouch control the damper directly.
@@ -102,6 +113,12 @@ trigger:
     attribute: hvac_action
   - platform: state
     entity_id: !input window_sensors
+    to: "on"
+    for:
+      minutes: !input window_grace_minutes
+  - platform: state
+    entity_id: !input window_sensors
+    to: "off"
   - platform: state
     entity_id: !input zone_enabled
 
@@ -116,6 +133,7 @@ action:
       target_temp: !input target_temp
       master_climate: !input master_climate
       window_sensors: !input window_sensors
+      window_grace_minutes: !input window_grace_minutes
       spill_sensor: !input spill_sensor
       zone_enabled: !input zone_enabled
       gain: !input gain
@@ -124,9 +142,15 @@ action:
       target: "{{ states(target_temp) | float(0) }}"
       master_action: "{{ state_attr(master_climate, 'hvac_action') }}"
       zone_is_enabled: "{{ is_state(zone_enabled, 'on') }}"
+      master_is_off: "{{ states(master_climate) == 'off' }}"
       any_window_open: >-
-        {{ window_sensors | length > 0 and
-           expand(window_sensors) | selectattr('state', 'eq', 'on') | list | count > 0 }}
+        {% set ns = namespace(open_sustained=false) %}
+        {% for w in window_sensors %}
+          {% if is_state(w, 'on') and (now() - states[w].last_changed).total_seconds() >= (window_grace_minutes | float * 60) %}
+            {% set ns.open_sustained = true %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.open_sustained }}
       spill_active: >-
         {{ spill_sensor != '' and is_state(spill_sensor, 'on') }}
       is_stale: >-
@@ -145,6 +169,15 @@ action:
       raw_position: "{{ (gain | float) * (need | float) }}"
       stepped_position: "{{ ((raw_position / step) | round(0) * step) | int }}"
       clamped_position: "{{ [0, [100, stepped_position] | min] | max }}"
+  - if:
+      - condition: template
+        value_template: "{{ zone_is_enabled and master_is_off and not any_window_open }}"
+    then:
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: !input master_climate
+        data:
+          hvac_mode: "{{ state_attr(master_climate, 'last_active_hvac_mode') }}"
   - choose:
       # Spill zone: hands off, let AirTouch control it directly
       - conditions: "{{ spill_active }}"
