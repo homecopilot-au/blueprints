@@ -149,6 +149,9 @@ action:
       step: !input step
       current: "{{ states(room_sensor) | float(0) }}"
       target: "{{ states(target_temp) | float(0) }}"
+      current_invalid: "{{ (states(room_sensor) | float(none)) is none }}"
+      target_invalid: "{{ (states(target_temp) | float(none)) is none }}"
+      sensor_data_invalid: "{{ current_invalid or target_invalid }}"
       master_action: "{{ state_attr(master_climate, 'hvac_action') }}"
       zone_is_enabled: "{{ is_state(zone_enabled, 'on') }}"
       master_is_off: "{{ states(master_climate) == 'off' }}"
@@ -167,11 +170,10 @@ action:
         {% set last_seen_dt = (last_seen_state | as_datetime) if last_seen_state not in [none, 'unknown', 'unavailable'] else none %}
         {{ last_seen_dt is not none and
            (now() - last_seen_dt).total_seconds() > (stale_after_minutes | float * 60) }}
-      will_wake: "{{ zone_is_enabled and master_is_off and not any_window_open and not is_stale }}"
-      effective_action: >-
+      anticipated_action: >-
         {% if master_action in ['heating', 'cooling'] %}
           {{ master_action }}
-        {% elif will_wake %}
+        {% else %}
           {% set wake_mode = state_attr(master_climate, 'last_active_hvac_mode') %}
           {% if wake_mode == 'cool' %}
             cooling
@@ -180,13 +182,11 @@ action:
           {% else %}
             {{ 'cooling' if current > target else 'heating' }}
           {% endif %}
-        {% else %}
-          {{ master_action }}
         {% endif %}
       need: >-
-        {% if effective_action == 'cooling' %}
+        {% if anticipated_action == 'cooling' %}
           {{ current - target }}
-        {% elif effective_action == 'heating' %}
+        {% elif anticipated_action == 'heating' %}
           {{ target - current }}
         {% else %}
           {{ -100 }}
@@ -194,6 +194,9 @@ action:
       raw_position: "{{ (gain | float) * (need | float) }}"
       stepped_position: "{{ ((raw_position / step) | round(0) * step) | int }}"
       clamped_position: "{{ [0, [100, stepped_position] | min] | max }}"
+      will_wake: >-
+        {{ zone_is_enabled and master_is_off and not any_window_open
+           and not is_stale and not sensor_data_invalid and clamped_position > 0 }}
   - choose:
       # Spill zone: hands off, let AirTouch control it directly
       - conditions: "{{ spill_active }}"
@@ -216,6 +219,9 @@ action:
               position: 0
       # Stale sensor: hold current position, don't recompute
       - conditions: "{{ is_stale }}"
+        sequence: []
+      # Bad entity reference (target_temp or room_sensor unresolvable): hold, don't guess
+      - conditions: "{{ sensor_data_invalid }}"
         sequence: []
     default:
       - service: cover.set_cover_position
