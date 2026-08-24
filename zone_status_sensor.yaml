@@ -90,6 +90,9 @@ sensor:
   state: >-
     {% set current = states(room_sensor) | float(0) %}
     {% set target = states(target_temp) | float(0) %}
+    {% set current_invalid = (states(room_sensor) | float(none)) is none %}
+    {% set target_invalid = (states(target_temp) | float(none)) is none %}
+    {% set sensor_data_invalid = current_invalid or target_invalid %}
     {% set master_action = state_attr(master_climate, 'hvac_action') %}
     {% set zone_is_enabled = is_state(zone_enabled, 'on') %}
     {% set ns = namespace(open_sustained=false) %}
@@ -112,6 +115,8 @@ sensor:
       Off — window open
     {% elif is_stale %}
       Off — sensor not reporting
+    {% elif sensor_data_invalid %}
+      Error — target or sensor entity unavailable, check configuration
     {% elif master_action == 'cooling' and target > current %}
       Can't reach target — cooling active house-wide
     {% elif master_action == 'heating' and target < current %}
