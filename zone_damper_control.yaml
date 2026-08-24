@@ -100,6 +100,15 @@ blueprint:
           min: 5
           max: 25
           unit_of_measurement: "%"
+    wake_delay_seconds:
+      name: Wake Delay (seconds)
+      description: Pause between setting the damper position and turning the master AC on, so the damper motor has time to physically move before the compressor starts.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: seconds
 
 trigger:
   - platform: time_pattern
@@ -158,10 +167,26 @@ action:
         {% set last_seen_dt = (last_seen_state | as_datetime) if last_seen_state not in [none, 'unknown', 'unavailable'] else none %}
         {{ last_seen_dt is not none and
            (now() - last_seen_dt).total_seconds() > (stale_after_minutes | float * 60) }}
+      will_wake: "{{ zone_is_enabled and master_is_off and not any_window_open and not is_stale }}"
+      effective_action: >-
+        {% if master_action in ['heating', 'cooling'] %}
+          {{ master_action }}
+        {% elif will_wake %}
+          {% set wake_mode = state_attr(master_climate, 'last_active_hvac_mode') %}
+          {% if wake_mode == 'cool' %}
+            cooling
+          {% elif wake_mode == 'heat' %}
+            heating
+          {% else %}
+            {{ 'cooling' if current > target else 'heating' }}
+          {% endif %}
+        {% else %}
+          {{ master_action }}
+        {% endif %}
       need: >-
-        {% if master_action == 'cooling' %}
+        {% if effective_action == 'cooling' %}
           {{ current - target }}
-        {% elif master_action == 'heating' %}
+        {% elif effective_action == 'heating' %}
           {{ target - current }}
         {% else %}
           {{ -100 }}
@@ -169,15 +194,6 @@ action:
       raw_position: "{{ (gain | float) * (need | float) }}"
       stepped_position: "{{ ((raw_position / step) | round(0) * step) | int }}"
       clamped_position: "{{ [0, [100, stepped_position] | min] | max }}"
-  - if:
-      - condition: template
-        value_template: "{{ zone_is_enabled and master_is_off and not any_window_open }}"
-    then:
-      - service: climate.set_hvac_mode
-        target:
-          entity_id: !input master_climate
-        data:
-          hvac_mode: "{{ state_attr(master_climate, 'last_active_hvac_mode') }}"
   - choose:
       # Spill zone: hands off, let AirTouch control it directly
       - conditions: "{{ spill_active }}"
@@ -207,6 +223,17 @@ action:
           entity_id: !input damper_cover
         data:
           position: "{{ clamped_position }}"
+  - if:
+      - condition: template
+        value_template: "{{ will_wake }}"
+    then:
+      - delay:
+          seconds: !input wake_delay_seconds
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: !input master_climate
+        data:
+          hvac_mode: "{{ state_attr(master_climate, 'last_active_hvac_mode') }}"
 
 mode: single
 max_exceeded: silent
