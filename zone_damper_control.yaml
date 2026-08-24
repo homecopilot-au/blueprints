@@ -101,12 +101,12 @@ blueprint:
           max: 25
           unit_of_measurement: "%"
     wake_delay_seconds:
-      name: Wake Delay (seconds)
-      description: Pause between setting the damper position and turning the master AC on, so the damper motor has time to physically move before the compressor starts.
-      default: 5
+      name: Wake Delay Timeout (seconds)
+      description: Maximum time to wait for the damper to physically reach its commanded position before turning the master AC on. If it hasn't confirmed by this timeout, the wake proceeds anyway rather than blocking indefinitely.
+      default: 20
       selector:
         number:
-          min: 0
+          min: 5
           max: 60
           unit_of_measurement: seconds
 
@@ -227,8 +227,10 @@ action:
       - condition: template
         value_template: "{{ will_wake }}"
     then:
-      - delay:
+      - wait_template: "{{ state_attr(damper_cover, 'current_position') == clamped_position }}"
+        timeout:
           seconds: !input wake_delay_seconds
+        continue_on_timeout: true
       - service: climate.set_hvac_mode
         target:
           entity_id: !input master_climate
