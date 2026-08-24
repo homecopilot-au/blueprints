@@ -51,6 +51,14 @@ blueprint:
         entity:
           domain: binary_sensor
           multiple: true
+    window_grace_minutes:
+      name: Window Open Grace Period (minutes)
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 30
+          unit_of_measurement: minutes
     spill_sensor:
       name: Spill Zone Indicator (optional)
       default: ""
@@ -72,6 +80,7 @@ variables:
   target_temp: !input target_temp
   master_climate: !input master_climate
   window_sensors: !input window_sensors
+  window_grace_minutes: !input window_grace_minutes
   spill_sensor: !input spill_sensor
   zone_enabled: !input zone_enabled
 
@@ -83,8 +92,13 @@ sensor:
     {% set target = states(target_temp) | float(0) %}
     {% set master_action = state_attr(master_climate, 'hvac_action') %}
     {% set zone_is_enabled = is_state(zone_enabled, 'on') %}
-    {% set any_window_open = window_sensors | length > 0 and
-         expand(window_sensors) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+    {% set ns = namespace(open_sustained=false) %}
+    {% for w in window_sensors %}
+      {% if is_state(w, 'on') and (now() - states[w].last_changed).total_seconds() >= (window_grace_minutes | float * 60) %}
+        {% set ns.open_sustained = true %}
+      {% endif %}
+    {% endfor %}
+    {% set any_window_open = ns.open_sustained %}
     {% set spill_active = spill_sensor != '' and is_state(spill_sensor, 'on') %}
     {% set last_seen_state = states(room_sensor_last_seen) if room_sensor_last_seen != '' else none %}
     {% set last_seen_dt = (last_seen_state | as_datetime) if last_seen_state not in [none, 'unknown', 'unavailable'] else none %}
