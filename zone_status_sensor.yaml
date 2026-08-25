@@ -103,6 +103,7 @@ sensor:
     {% endfor %}
     {% set any_window_open = ns.open_sustained %}
     {% set spill_active = spill_sensor != '' and is_state(spill_sensor, 'on') %}
+    {% set is_dry_or_fan_only = states(master_climate) in ['dry', 'fan_only'] %}
     {% set last_seen_state = states(room_sensor_last_seen) if room_sensor_last_seen != '' else none %}
     {% set last_seen_dt = (last_seen_state | as_datetime) if last_seen_state not in [none, 'unknown', 'unavailable'] else none %}
     {% set is_stale = last_seen_dt is not none and
@@ -117,6 +118,8 @@ sensor:
       Off — sensor not reporting
     {% elif sensor_data_invalid %}
       Error — target or sensor entity unavailable, check configuration
+    {% elif is_dry_or_fan_only %}
+      {{ states(master_climate) | capitalize | replace('_', ' ') }} mode
     {% elif master_action == 'cooling' and target > current %}
       Can't reach target — cooling active house-wide
     {% elif master_action == 'heating' and target < current %}
