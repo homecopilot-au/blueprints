@@ -109,6 +109,15 @@ blueprint:
           min: 5
           max: 60
           unit_of_measurement: seconds
+    wake_cooldown_minutes:
+      name: Wake Cooldown (minutes)
+      description: Minimum time since the master AC's mode last changed before this zone is allowed to wake it again. Protects the compressor from rapid on/off cycling if conditions are unstable.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: minutes
 
 trigger:
   - platform: time_pattern
@@ -147,6 +156,7 @@ action:
       zone_enabled: !input zone_enabled
       gain: !input gain
       step: !input step
+      wake_cooldown_minutes: !input wake_cooldown_minutes
       current: "{{ states(room_sensor) | float(0) }}"
       target: "{{ states(target_temp) | float(0) }}"
       current_invalid: "{{ (states(room_sensor) | float(none)) is none }}"
@@ -194,9 +204,13 @@ action:
       raw_position: "{{ (gain | float) * (need | float) }}"
       stepped_position: "{{ ((raw_position / step) | round(0) * step) | int }}"
       clamped_position: "{{ [0, [100, stepped_position] | min] | max }}"
+      mode_cooldown_elapsed: >-
+        {{ (now() - states[master_climate].last_changed).total_seconds()
+           >= (wake_cooldown_minutes | float * 60) }}
       will_wake: >-
         {{ zone_is_enabled and master_is_off and not any_window_open
-           and not is_stale and not sensor_data_invalid and clamped_position > 0 }}
+           and not is_stale and not sensor_data_invalid
+           and clamped_position > 0 and mode_cooldown_elapsed }}
   - choose:
       # Spill zone: hands off, let AirTouch control it directly
       - conditions: "{{ spill_active }}"
