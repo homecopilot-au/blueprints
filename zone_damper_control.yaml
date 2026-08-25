@@ -165,6 +165,7 @@ action:
       master_action: "{{ state_attr(master_climate, 'hvac_action') }}"
       zone_is_enabled: "{{ is_state(zone_enabled, 'on') }}"
       master_is_off: "{{ states(master_climate) == 'off' }}"
+      is_dry_or_fan_only: "{{ states(master_climate) in ['dry', 'fan_only'] }}"
       any_window_open: >-
         {% set ns = namespace(open_sustained=false) %}
         {% for w in window_sensors %}
@@ -236,6 +237,9 @@ action:
         sequence: []
       # Bad entity reference (target_temp or room_sensor unresolvable): hold, don't guess
       - conditions: "{{ sensor_data_invalid }}"
+        sequence: []
+      # Dry or Fan Only: no temperature to chase, leave damper as-is for manual control
+      - conditions: "{{ is_dry_or_fan_only }}"
         sequence: []
     default:
       - service: cover.set_cover_position
