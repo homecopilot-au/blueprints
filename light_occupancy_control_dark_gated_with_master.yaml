@@ -17,7 +17,7 @@ blueprint:
     The master switch is left on when the light turns off, whether by
     timer or by daylight — this blueprint never powers it back down.
   domain: automation
-  source_url: https://github.com/homecopilot-au/blueprints/blob/main/light_occupancy_control_dark_gated_with_master.yaml
+  source_url: https://github.com/homecopilot-au/blueprints/edit/main/light_occupancy_control_dark_gated_with_master.yaml
   input:
     occupancy_sensor:
       name: Occupancy sensor
@@ -53,9 +53,10 @@ blueprint:
           mode: box
     light_switch:
       name: Light switch (Shelly RGBW controller)
+      description: Light entity for the Shelly RGBW controller output.
       selector:
         entity:
-          domain: switch
+          domain: light
     light_off_timer:
       name: Light-off delay timer
       description: Starts when occupancy clears; on finish, light turns off.
@@ -131,7 +132,7 @@ action:
                       entity_id: !input master_power_switch
                   - delay:
                       seconds: !input power_on_delay
-              - action: switch.turn_on
+              - action: light.turn_on
                 target:
                   entity_id: !input light_switch
 
@@ -153,7 +154,7 @@ action:
                   entity_id: !input master_power_switch
               - delay:
                   seconds: !input power_on_delay
-          - action: switch.turn_on
+          - action: light.turn_on
             target:
               entity_id: !input light_switch
 
@@ -165,7 +166,7 @@ action:
           - action: timer.cancel
             target:
               entity_id: !input light_off_timer
-          - action: switch.turn_off
+          - action: light.turn_off
             target:
               entity_id: !input light_switch
 
@@ -188,6 +189,6 @@ action:
           - condition: trigger
             id: light_off_timer_finished
         sequence:
-          - action: switch.turn_off
+          - action: light.turn_off
             target:
               entity_id: !input light_switch
