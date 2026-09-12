@@ -1,17 +1,27 @@
 blueprint:
   name: Light Occupancy Control (Darkness-Gated)
   description: >
-    Light only turns on for occupancy while the "is dark" sensor is true.
-    Off timing (light_off_timer) is unaffected by darkness — once the light
-    is on, it turns off N minutes after occupancy clears regardless of
-    daylight, since a delayed light on the way out is undesirable either way.
-    If darkness becomes true while the room is already occupied (e.g. an
-    overcast change, or a shower steaming up a window), the light turns on
-    at that point too — it isn't a one-off check at the entry trigger.
-    Duration is set on the timer helper entity itself. The "occupancy
-    cleared" trigger has an optional debounce to filter momentary sensor
-    drop-outs — leave it at 0 if your sensor already has its own
-    absence-delay setting (e.g. FP300's absence_delay_timer).
+    Light only turns on for occupancy while the "is dark" sensor reads
+    true at that moment — is_dark_sensor is checked purely as a
+    condition, it is not a trigger. It does not catch up if darkness
+    begins mid-occupancy, and it never snaps the light off just because
+    it becomes light while the room is occupied — occupancy clearing via
+    light_off_timer is the only way the light turns off. This is
+    deliberate: letting is_dark_sensor act as a trigger created a
+    dangerous race where the light itself (turning on) could influence
+    a poorly-sited darkness sensor, causing the automation to
+    immediately react to its own side-effect and cycle the light off
+    again — a real incident on a stairwell where a light sensor picked
+    up the rail LED's own glow. Off timing (light_off_timer) starts
+    only if the light is actually on, since it's a no-op otherwise.
+    Duration is set on the timer helper entity itself.
+    Whenever the light turns off, every light in the nominated area is
+    swept off too — not just light_switch — so lights the occupant
+    turned on manually don't get left orphaned, except any carrying the
+    "Occupancy Control Off Excluded" label, which this blueprint leaves
+    untouched. The "occupancy cleared" trigger has an optional debounce
+    to filter momentary sensor drop-outs — leave it at 0 if your sensor
+    already has its own absence-delay setting.
   domain: automation
   source_url: https://github.com/homecopilot-au/blueprints/blob/main/light_occupancy_control_dark_gated.yaml
   input:
@@ -31,6 +41,16 @@ blueprint:
       selector:
         entity:
           domain: switch
+    area:
+      name: Area to sweep on exit
+      description: >
+        Whenever the light turns off, every light entity in this area is
+        turned off except those carrying the "Occupancy Control Off
+        Excluded" label — this catches lights the occupant turned on
+        manually that aren't the nominated light_switch. Label any light
+        you want this automation to leave alone.
+      selector:
+        area: {}
     light_off_timer:
       name: Light-off delay timer
       description: Starts when occupancy clears; on finish, light turns off.
@@ -65,10 +85,6 @@ trigger:
     for:
       seconds: !input occupancy_clear_debounce
     id: occupancy_off
-  - trigger: state
-    entity_id: !input is_dark_sensor
-    to: "on"
-    id: became_dark
   - trigger: event
     event_type: timer.finished
     event_data:
@@ -76,6 +92,9 @@ trigger:
     id: light_off_timer_finished
 
 condition: []
+
+variables:
+  area: !input area
 
 action:
   - choose:
@@ -96,32 +115,28 @@ action:
                 target:
                   entity_id: !input light_switch
 
-      # --- It became dark while the room is occupied: catch up and turn light on ---
-      - conditions:
-          - condition: trigger
-            id: became_dark
-          - condition: state
-            entity_id: !input occupancy_sensor
-            state: "on"
-        sequence:
-          - action: switch.turn_on
-            target:
-              entity_id: !input light_switch
-
-      # --- Occupancy cleared: start off-timer regardless of darkness ---
+      # --- Occupancy cleared: start off-timer only if the light is actually on ---
       - conditions:
           - condition: trigger
             id: occupancy_off
         sequence:
-          - action: timer.start
-            target:
-              entity_id: !input light_off_timer
+          - if:
+              - condition: state
+                entity_id: !input light_switch
+                state: "on"
+            then:
+              - action: timer.start
+                target:
+                  entity_id: !input light_off_timer
 
-      # --- Light-off timer elapsed ---
+      # --- Light-off timer elapsed: sweep the area, excluding labeled lights ---
       - conditions:
           - condition: trigger
             id: light_off_timer_finished
         sequence:
-          - action: switch.turn_off
+          - action: light.turn_off
             target:
-              entity_id: !input light_switch
+              entity_id: >
+                {{ area_entities(area) | select('match', '^light\.')
+                   | reject('in', label_entities('Occupancy Control Off Excluded'))
+                   | list }}
