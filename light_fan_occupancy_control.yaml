@@ -5,10 +5,15 @@ blueprint:
     (light_off_timer). Fan on after continuous occupancy of N minutes
     (fan_on_timer), off N minutes after clear (fan_off_timer).
     All durations are set on the timer helper entities themselves —
-    this blueprint just sequences them. The "occupancy cleared" trigger
-    has an optional debounce to filter momentary sensor drop-outs (e.g.
-    multi-sensor group boundary blips) without delaying the "occupancy
-    detected" response.
+    this blueprint just sequences them. On the light-off trigger, every
+    light in the nominated area is turned off (not just light_switch) so
+    lights the occupant turned on manually don't get left orphaned —
+    except any carrying the "Occupancy Control Off Excluded" label,
+    which this blueprint leaves untouched. The fan side is unaffected by
+    the sweep — fan_switch is the only thing the fan-off action ever
+    touches. The "occupancy cleared" trigger has an optional debounce to
+    filter momentary sensor drop-outs (e.g. multi-sensor group boundary
+    blips) without delaying the "occupancy detected" response.
   domain: automation
   source_url: https://github.com/homecopilot-au/blueprints/blob/main/light_fan_occupancy_control.yaml
   input:
@@ -19,14 +24,25 @@ blueprint:
           domain: binary_sensor
     light_switch:
       name: Light switch
+      description: Light entity for the room's main light.
       selector:
         entity:
-          domain: switch
+          domain: light
     fan_switch:
       name: Exhaust fan switch
       selector:
         entity:
           domain: switch
+    area:
+      name: Area to sweep on light-off
+      description: >
+        On the light-off trigger, every light entity in this area is turned
+        off except those carrying the "Occupancy Control Off Excluded"
+        label — this catches lights turned on manually that aren't the
+        nominated light_switch. Label any light you want this automation
+        to leave alone. Does not affect the fan.
+      selector:
+        area: {}
     light_off_timer:
       name: Light-off delay timer
       description: Starts when occupancy clears; on finish, light turns off.
@@ -92,6 +108,9 @@ trigger:
 
 condition: []
 
+variables:
+  area: !input area
+
 action:
   - choose:
       # --- Occupancy detected ---
@@ -105,7 +124,7 @@ action:
           - action: timer.cancel
             target:
               entity_id: !input fan_off_timer
-          - action: switch.turn_on
+          - action: light.turn_on
             target:
               entity_id: !input light_switch
           # Only (re)start the fan-on delay if the fan isn't already running
@@ -149,14 +168,17 @@ action:
             target:
               entity_id: !input fan_switch
 
-      # --- Light-off timer elapsed ---
+      # --- Light-off timer elapsed: sweep the area, excluding labeled lights ---
       - conditions:
           - condition: trigger
             id: light_off_timer_finished
         sequence:
-          - action: switch.turn_off
+          - action: light.turn_off
             target:
-              entity_id: !input light_switch
+              entity_id: >
+                {{ area_entities(area) | select('match', '^light\.')
+                   | reject('in', label_entities('Occupancy Control Off Excluded'))
+                   | list }}
 
       # --- Fan-off timer elapsed ---
       - conditions:
