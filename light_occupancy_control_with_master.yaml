@@ -3,15 +3,20 @@ blueprint:
   description: >
     Same logic as Light Occupancy Control: light on immediately on
     occupancy, off N minutes after clear (light_off_timer). Duration is set
-    on the timer helper entity itself.
-    Difference: the light is a Shelly RGBW controller (light_switch) that
-    sits behind a separate master power switch. Whenever the light needs to
-    turn on, the master switch is turned on first (only if it's currently
-    off), followed by a short delay to let the Shelly boot/re-establish
-    power before the light switch command is sent. The master switch is
-    left on when the light turns off — this blueprint never powers it back
-    down — since the goal is just to guarantee the Shelly is ready to
-    receive commands when needed, not to manage the power switch generally.
+    on the timer helper entity itself. On the off trigger, every light in
+    the nominated area is turned off (not just light_switch) so lights
+    turned on manually don't get left orphaned — except any carrying the
+    "Occupancy Control Off Excluded" label, which this blueprint leaves
+    untouched.
+    Difference: the light sits behind a separate master power switch (e.g.
+    a Shelly-style controller that needs its own power switch turned on
+    before it'll respond). Whenever the light needs to turn on, the master
+    switch is turned on first (only if it's currently off), followed by a
+    short delay to let the controller boot/re-establish power before the
+    light command is sent. The master switch is left on when the light
+    turns off — this blueprint never powers it back down — since the goal
+    is just to guarantee the controller is ready to receive commands when
+    needed, not to manage the power switch generally.
   domain: automation
   source_url: https://github.com/homecopilot-au/blueprints/edit/main/light_occupancy_control_with_master.yaml
   input:
@@ -23,7 +28,7 @@ blueprint:
     master_power_switch:
       name: Master power switch
       description: >
-        Switch controlling power to the Shelly RGBW controller. Turned on
+        Switch controlling power to the light controller. Turned on
         first (if off) whenever the light needs to come on, with a short
         delay before the light switch command.
       selector:
@@ -33,7 +38,7 @@ blueprint:
       name: Power-on delay
       description: >
         Seconds to wait after turning on the master power switch before
-        sending the light-on command, to let the Shelly boot.
+        sending the light-on command, to let the controller boot.
       default: 2
       selector:
         number:
@@ -42,11 +47,21 @@ blueprint:
           unit_of_measurement: seconds
           mode: box
     light_switch:
-      name: Light switch (Shelly RGBW controller)
-      description: Light entity for the Shelly RGBW controller output.
+      name: Light switch
+      description: Light entity for the controller output.
       selector:
         entity:
           domain: light
+    area:
+      name: Area to sweep on exit
+      description: >
+        On the light-off trigger, every light entity in this area is turned
+        off except those carrying the "Occupancy Control Off Excluded"
+        label — this catches lights turned on manually that aren't the
+        nominated light_switch. Label any light you want this automation
+        to leave alone.
+      selector:
+        area: {}
     light_off_timer:
       name: Light-off delay timer
       description: Starts when occupancy clears; on finish, light turns off.
@@ -57,7 +72,7 @@ blueprint:
       name: Occupancy-cleared debounce
       description: >
         Ignore momentary occupancy drop-outs shorter than this before
-        treating the stairs as vacated. Only applies to the "occupancy
+        treating the room as vacated. Only applies to the "occupancy
         cleared" trigger — occupancy detected still reacts instantly.
       default: 0
       selector:
@@ -88,6 +103,9 @@ trigger:
     id: light_off_timer_finished
 
 condition: []
+
+variables:
+  area: !input area
 
 action:
   - choose:
@@ -122,11 +140,14 @@ action:
             target:
               entity_id: !input light_off_timer
 
-      # --- Light-off timer elapsed ---
+      # --- Light-off timer elapsed: sweep the area, excluding labeled lights ---
       - conditions:
           - condition: trigger
             id: light_off_timer_finished
         sequence:
           - action: light.turn_off
             target:
-              entity_id: !input light_switch
+              entity_id: >
+                {{ area_entities(area) | select('match', '^light\.')
+                   | reject('in', label_entities('Occupancy Control Off Excluded'))
+                   | list }}
