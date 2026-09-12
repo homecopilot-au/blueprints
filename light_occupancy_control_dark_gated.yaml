@@ -38,9 +38,10 @@ blueprint:
           domain: binary_sensor
     light_switch:
       name: Light switch
+      description: Light entity for the room's main light.
       selector:
         entity:
-          domain: switch
+          domain: light
     area:
       name: Area to sweep on exit
       description: >
@@ -111,7 +112,7 @@ action:
                 entity_id: !input is_dark_sensor
                 state: "on"
             then:
-              - action: switch.turn_on
+              - action: light.turn_on
                 target:
                   entity_id: !input light_switch
 
