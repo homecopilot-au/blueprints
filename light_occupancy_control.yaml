@@ -3,13 +3,16 @@ blueprint:
   description: >
     Light on immediately on occupancy, off N minutes after clear
     (light_off_timer). Duration is set on the timer helper entity itself —
-    this blueprint just sequences it. The "occupancy cleared" trigger has
-    an optional debounce to filter momentary sensor drop-outs (e.g.
+    this blueprint just sequences it. On the off trigger, every light in
+    the nominated area is turned off (not just light_switch) so lights the
+    occupant turned on manually don't get left orphaned — except any
+    carrying the "Occupancy Control Off Excluded" label, which this
+    blueprint leaves untouched. The "occupancy cleared" trigger has an
+    optional debounce to filter momentary sensor drop-outs (e.g.
     multi-sensor group boundary blips) without delaying the "occupancy
-    detected" response. Use the sensor's own absence-delay setting (e.g.
-    FP300's absence_delay_timer) as the primary fix where available —
-    this debounce is a backstop, so leave it at 0 if the sensor already
-    handles it.
+    detected" response. Use the sensor's own absence-delay setting where
+    available as the primary fix — this debounce is a backstop, so leave
+    it at 0 if the sensor already handles it.
   domain: automation
   source_url: https://github.com/homecopilot-au/blueprints/blob/main/light_occupancy_control.yaml
   input:
@@ -23,6 +26,16 @@ blueprint:
       selector:
         entity:
           domain: switch
+    area:
+      name: Area to sweep on exit
+      description: >
+        On the light-off trigger, every light entity in this area is turned
+        off except those carrying the "Occupancy Control Off Excluded"
+        label — this catches lights the occupant turned on manually that
+        aren't the nominated light_switch. Label any light you want this
+        automation to leave alone.
+      selector:
+        area: {}
     light_off_timer:
       name: Light-off delay timer
       description: Starts when occupancy clears; on finish, light turns off.
@@ -65,6 +78,9 @@ trigger:
 
 condition: []
 
+variables:
+  area: !input area
+
 action:
   - choose:
       # --- Occupancy detected ---
@@ -88,11 +104,14 @@ action:
             target:
               entity_id: !input light_off_timer
 
-      # --- Light-off timer elapsed ---
+      # --- Light-off timer elapsed: sweep the area, excluding labeled lights ---
       - conditions:
           - condition: trigger
             id: light_off_timer_finished
         sequence:
-          - action: switch.turn_off
+          - action: light.turn_off
             target:
-              entity_id: !input light_switch
+              entity_id: >
+                {{ area_entities(area) | select('match', '^light\.')
+                   | reject('in', label_entities('Occupancy Control Off Excluded'))
+                   | list }}
