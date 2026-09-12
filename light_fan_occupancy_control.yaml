@@ -67,8 +67,9 @@ blueprint:
         Ignore momentary occupancy drop-outs shorter than this (e.g. FP300
         boundary blips on multi-sensor groups) before treating the room as
         vacated. Only applies to the "occupancy cleared" trigger — occupancy
-        detected still reacts instantly.
-      default: 5
+        detected still reacts instantly. Leave at 0 if your sensor already
+        has its own absence-delay setting (e.g. FP300's absence_delay_timer).
+      default: 0
       selector:
         number:
           min: 0
